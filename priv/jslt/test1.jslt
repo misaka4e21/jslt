@@ -1,0 +1,5 @@
+{
+  "alerta": "const:antifascista",
+  "subdomain": "ref:a.b",
+  "...": "..."
+}

@@ -1,5 +1,5 @@
 {
-  "alerta": "const:antifascista",
-  "subdomain": "ref:a.b",
-  "...": "..."
+  "$rest": "$keep",
+  "alerta": "$const:antifascista",
+  "subdomain": "$ref:a.b"
 }

@@ -1,61 +1,112 @@
 defmodule Jslt.Trans do
-
-  defp keylist_from_dotstring(dotstr) do
-    String.split(dotstr, ".")
+  # Generic get an item from a Collection.
+  defp get_at(nil, _) do
+    nil
+  end
+  defp get_at(collection, index) when is_map(collection) do
+    Map.get(collection, index)
+  end
+  defp get_at(collection, index) when is_list(collection) do
+    Enum.at(List.to_tuple(collection), index)
+  end
+  defp get_at(collection, index) do
+    Enum.at(collection, index)
   end
 
-  defp parse_val("...") do
-    {:rest}
-  end
-  defp parse_val("ref:" <> key) do
-    {:reference, keylist_from_dotstring(key)}
-  end
-  defp parse_val("const:" <> string) do
-    {:const, string}
-  end
-  defp parse_val(map = %{}) do
-    {:object, map}
-  end
-  defp parse_val(other) do
-    {:const, other}
-  end
-
-  defp resolve([head|tail], obj) do
-    resolve(tail, Map.get(obj, head))
-  end
-  defp resolve([], obj) do
-    obj
-  end
-
-  defp apply_parse_val(jslt, acc, obj, key, val) do
-    val = parse_val(val)
-    case val do
-      {:rest} ->
-          Map.merge(acc, obj)
-      {:const, val} ->
-          Map.put(acc, key, val)
-      {:object, _} ->
-          Map.put(acc, key,
-                  eval_parse_val(Map.get(jslt, key),
-                                 Map.get(obj, key)))
-      {:reference, keylist} ->
-          Map.put(acc, key, resolve(keylist, obj))
+  defp get_from_global_env(%{} = global_env, key) do
+    with {:ok, value} <- Map.fetch(global_env, key) do
+      value
+    else
+      _ ->
+        try do
+          get_from_local_env(global_env, Tuple.to_list(key))
+        rescue
+          _ ->
+            throw(:ref_not_found)
+        end
     end
   end
 
-  defp eval_parse_val(jslt, obj) do
-    jslt
-    |> Enum.reduce(%{}, fn {key, value}, acc ->
-      apply_parse_val(jslt, acc, obj, key, value)
+  defp get_from_local_env(local_env, [head|tail]) do
+    get_from_local_env(get_at(local_env, head), tail)
+  end
+  defp get_from_local_env(local_env, []) do
+    local_env
+  end
+
+
+  defp key_from_dotstring(dotstr) do
+    String.split(dotstr, ".")
+    |> Enum.map(fn str ->
+      case str do
+        "$" <> index ->
+          String.to_integer(index)
+        index ->
+          index
+      end
     end)
+    |> List.to_tuple()
+  end
+
+  defp eval({key, "$const:" <> string}, _object, global_env) do
+    {string, Map.put(global_env, key, string)}
+  end
+
+  defp eval({key, "$keep"}, object, global_env) when key != "$rest" do
+    {object, Map.put(global_env, key, object)}
+  end
+
+  defp eval({key, "$ref:" <> dotstring}, _object, global_env) do
+    result = get_from_global_env(global_env, key_from_dotstring(dotstring))
+    {result, Map.put(global_env, key, result)}
+  end
+
+  defp eval({key, %{"$rest" => "$keep"} = map}, object, global_env) do
+    map = map |> Enum.filter(fn {key, _val} -> key != "$rest" end) |> Map.new()
+    {const_map, const_env} = eval_map({key, map}, map, global_env)
+    {Map.merge(object, const_map), const_env}
+  end
+
+  defp eval({key, %{} = map}, _, global_env) do
+    eval_map({key, map}, map, global_env)
+  end
+
+  defp eval({key, [] = list}, _, global_env) do
+    {list, global_env} = eval_collection({key, Enum.with_index(list)}, list, global_env)
+    list = Enum.map(list, fn {_, val} ->
+      val
+    end)
+    {list, global_env}
+  end
+
+  defp eval({key, const_val}, _, global_env) do
+    {const_val, Map.put(global_env, key, const_val)}
+  end
+
+  def eval_collection({key, value}, object, global_env) do
+    value
+    |> Enum.map_reduce(global_env, fn {subkey, val}, acc ->
+      newkey = Tuple.append(key, subkey)
+      {subelem, sub_global_env} = eval({newkey, val}, get_at(object, subkey), acc)
+      {{subkey, subelem}, Map.put(sub_global_env, key, subelem)}
+    end)
+  end
+
+  def eval_map({key, value}, object, global_env) do
+    {maplist, global_env} = eval_collection({key, value}, object, global_env)
+    {Map.new(maplist), global_env}
   end
 
   def trans(jslt, obj) do
     try do
-      eval_parse_val(jslt, obj)
+      {result, _} = eval({{}, jslt}, obj, obj)
+      result
     rescue
       _ ->
         :error
+    catch
+      :ref_not_found ->
+        :ref_not_found
     end
   end
 end

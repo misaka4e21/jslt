@@ -4,6 +4,13 @@ defmodule JsltTest do
 
   test "greets the world" do
     assert Jslt.hello() == :world
+    assert Jslt.Trans.trans(%{
+      "test" => "$ref:abc"
+    }, %{
+      "abc" => 123
+    }) == %{
+      "test" => 123
+    }
   end
 
   test "translates object" do
@@ -26,6 +33,6 @@ defmodule JsltTest do
     result = Jslt.convert_by_jslt("test1", %{
       "a" => ["abc", 123]
     })
-    assert result == :error
+    assert result == :ref_not_found
   end
 end

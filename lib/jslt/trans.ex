@@ -1,5 +1,5 @@
 defmodule Jslt.Trans do
-  # Generic get an item from a Collection.
+  # get an item from a generic collection.
   defp get_at(nil, _) do
     nil
   end
@@ -7,10 +7,10 @@ defmodule Jslt.Trans do
     Map.get(collection, index)
   end
   defp get_at(collection, index) when is_list(collection) do
-    Enum.at(List.to_tuple(collection), index)
-  end
-  defp get_at(collection, index) do
     Enum.at(collection, index)
+  end
+  defp get_at(collection, index) when is_tuple(collection) do
+    elem(collection, index)
   end
 
   defp get_from_global_env(%{} = global_env, key) do
@@ -19,7 +19,7 @@ defmodule Jslt.Trans do
     else
       _ ->
         try do
-          get_from_local_env(global_env, Tuple.to_list(key))
+          get_from_local_env(global_env, [:original|Tuple.to_list(key)])
         rescue
           _ ->
             throw(:ref_not_found)
@@ -71,8 +71,9 @@ defmodule Jslt.Trans do
     eval_map({key, map}, map, global_env)
   end
 
-  defp eval({key, [] = list}, _, global_env) do
-    {list, global_env} = eval_collection({key, Enum.with_index(list)}, list, global_env)
+  defp eval({key, list}, _, global_env) when is_list(list) do
+    indexed_list = list |> Enum.with_index() |> Enum.map(fn {val, index} -> {index, val} end)
+    {list, global_env} = eval_collection({key, indexed_list}, list, global_env)
     list = Enum.map(list, fn {_, val} ->
       val
     end)
@@ -83,7 +84,7 @@ defmodule Jslt.Trans do
     {const_val, Map.put(global_env, key, const_val)}
   end
 
-  def eval_collection({key, value}, object, global_env) do
+  defp eval_collection({key, value}, object, global_env) do
     value
     |> Enum.map_reduce(global_env, fn {subkey, val}, acc ->
       newkey = Tuple.append(key, subkey)
@@ -92,14 +93,14 @@ defmodule Jslt.Trans do
     end)
   end
 
-  def eval_map({key, value}, object, global_env) do
+  defp eval_map({key, value}, object, global_env) do
     {maplist, global_env} = eval_collection({key, value}, object, global_env)
     {Map.new(maplist), global_env}
   end
 
   def trans(jslt, obj) do
     try do
-      {result, _} = eval({{}, jslt}, obj, obj)
+      {result, _} = eval({{}, jslt}, obj, %{:original => obj})
       result
     rescue
       _ ->
